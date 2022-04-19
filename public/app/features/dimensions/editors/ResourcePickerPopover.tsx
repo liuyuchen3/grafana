@@ -20,6 +20,9 @@ interface Props {
   folderName: ResourceFolderName;
 }
 
+interface ErrorResponse {
+  message: string;
+}
 export const ResourcePickerPopover = (props: Props) => {
   const { value, onChange, mediaType, folderName } = props;
   const styles = useStyles2(getStyles);
@@ -36,17 +39,12 @@ export const ResourcePickerPopover = (props: Props) => {
   const [activePicker, setActivePicker] = useState<PickerTabType>(PickerTabType.Folder);
   const [formData, setFormData] = useState<FormData>(new FormData());
   const [upload, setUpload] = useState<boolean>(false);
+  const [error, setError] = useState<ErrorResponse>({ message: '' });
 
   const getTabClassName = (tabName: PickerTabType) => {
     return `${styles.resourcePickerPopoverTab} ${activePicker === tabName && styles.resourcePickerPopoverActiveTab}`;
   };
-  const getRequest = async (formData: FormData) => {
-    const response = await fetch('/api/storage/upload', {
-      method: 'POST',
-      body: formData,
-    });
-    return response.json();
-  };
+
   const renderFolderPicker = () => (
     <FolderPickerTab
       value={value}
@@ -59,7 +57,13 @@ export const ResourcePickerPopover = (props: Props) => {
 
   const renderURLPicker = () => <URLPickerTab newValue={newValue} setNewValue={setNewValue} mediaType={mediaType} />;
   const renderUploader = () => (
-    <FileUploader mediaType={mediaType} setFormData={setFormData} setUpload={setUpload} newValue={newValue} />
+    <FileUploader
+      mediaType={mediaType}
+      setFormData={setFormData}
+      setUpload={setUpload}
+      newValue={newValue}
+      error={error}
+    />
   );
   const renderPicker = () => {
     switch (activePicker) {
@@ -108,16 +112,30 @@ export const ResourcePickerPopover = (props: Props) => {
               <Button
                 className={styles.button}
                 variant={newValue && newValue !== value ? 'primary' : 'secondary'}
+                // TODO: put upload call here to avoid uploading to storage until
+                // user confirms. However, the drawback is we can't preview the
+                // image before hitting select. Maybe revisit the flow?
                 onClick={() => {
                   if (upload) {
-                    getRequest(formData).then((data) => {
-                      if (!data.err) {
+                    fetch('/api/storage/upload', {
+                      method: 'POST',
+                      body: formData,
+                    })
+                      .then((res) => {
+                        if (res.status >= 400) {
+                          res.json().then((data) => setError(data));
+                          return;
+                        } else {
+                          return res.json();
+                        }
+                      })
+                      .then((data) => {
                         getBackendSrv()
                           .get(`api/storage/read/${data.path}`)
                           .then(() => setNewValue(`${config.appUrl}api/storage/read/${data.path}`))
                           .then(() => onChange(`${config.appUrl}api/storage/read/${data.path}`));
-                      }
-                    });
+                      })
+                      .catch((err) => console.error(err));
                   } else {
                     onChange(newValue);
                   }
